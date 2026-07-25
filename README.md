@@ -19,8 +19,9 @@ This repo is at **Phase 1**. What exists is the *futures-native foundation*: the
 | Trade log (futures schema, R-native, mode-scoped) | ✅ built |
 | Strategy design + epoch ladder | ✅ documented (`docs/`) |
 | Analysis stack (structure, liquidity, profile, order flow, L1/L2) | ✅ built, 76/76 tests |
-| Strategies (the roster in `docs/STRATEGIES.md`) | ⬜ Phase 3 |
-| Execution engines + broker adapter | ⬜ Phase 3 |
+| Strategies (the roster in `docs/STRATEGIES.md`) | ✅ built, 75/75 tests |
+| Execution engines (entry, exit, position manager) | ✅ built |
+| Broker adapter (TastyTrade futures) | ⬜ Phase 4 |
 | Capacity calculator / tick chart + eligibility policy | ✅ built |
 | `devtools.sh` (capacity, config, tests) · `check_versions.sh` | ✅ built |
 | Installer / configure.sh / fleet control | ⬜ Phase 4 |
@@ -122,8 +123,19 @@ changing every table a dial was calibrated against.
 | `analysis/regime_confluence.py` | 0.1 | **L1** — ported grammar + calibrated dials |
 | `analysis/conviction_integrator.py` | 0.1 | **L2** — persistence, hysteresis, staleness |
 | `analysis/signal_journal.py` | 0.1 | log-only capture, never fatal |
-| `devtools.sh` | 0.2 | operator menu |
-| `check_versions.sh` | 0.2 | the push gate |
+| `analysis/opening_range.py` | 0.1 | the ORB state machine, definitions intact |
+| `strategy/base.py` | 0.1 | Signal contract — entry + stop + target or no trade |
+| `strategy/day_mode.py` | 0.1 | D1 break+retest · D2 sweep · D3 continuation |
+| `strategy/scalp_mode.py` | 0.1 | S1 absorption · S2 killzone continuation |
+| `strategy/swing_mode.py` | 0.1 | W1 PD-array · W2 value fade |
+| `strategy/hedge_mode.py` | 0.1 | H1 beta-weighted hedge |
+| `risk/setup_scorer.py` | 0.1 | weighted grade; geometry gate bypasses it |
+| `execution/order_confirm.py` | 0.1 | FillResult — nothing books on submission |
+| `execution/entry_engine.py` | 0.1 | mark-limit entries, sized to actual fills |
+| `execution/exit_engine.py` | 0.2 | the R ladder — scale, ratchet, trail, exhaustion |
+| `execution/position_manager.py` | 0.1 | anti-orphan, optional-kwarg tolerant |
+| `devtools.sh` | 0.3 | operator menu |
+| `check_versions.sh` | 0.3 | the push gate |
 
 ---
 

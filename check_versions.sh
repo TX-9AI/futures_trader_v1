@@ -1,6 +1,14 @@
 #!/bin/bash
 # =============================================================================
-# futures_trader_v1/check_versions.sh — v0.2
+# futures_trader_v1/check_versions.sh — v0.4
+# v0.4 — 2026-07-25 — GIT-AWARE BUMP CHECK. Header/changelog PARITY cannot catch
+#         a version bump that silently no-opped: if an edit misses the title
+#         line, title and changelog stay equally stale and parity still reads
+#         green. Happened twice (config.py/capacity.py, then exit_engine.py) —
+#         both times an edit assumed a "#" prefix that Python docstring headers
+#         do not have. This compares working-tree changes against HEAD and reds
+#         any changed .py/.sh whose diff contains no version line.
+# v0.3 — 2026-07-25 — Phase-3 canaries (22 new) + the execution suite in the gate.
 # v0.2 — 2026-07-25 — Phase-2 canaries (17 new) + both test suites in the gate.
 # v0.1 — 2026-07-25 — Initial build. Header/changelog parity + canaries.
 #
@@ -43,6 +51,21 @@ sys.exit(1 if bad else 0)
 PYEOF
 
 echo ""
+echo "── version bumped where content changed (git-aware) ───────────"
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  for f in $(git diff --name-only HEAD 2>/dev/null | grep -E '\.(py|sh)$'); do
+    [ -f "$f" ] || continue
+    if git diff -U0 HEAD -- "$f" | grep -qE '^\+.*— v[0-9]+\.[0-9]+'; then
+      echo "  ✓ $f  version line touched"
+    else
+      echo "  ✗ $f  CHANGED but no version line in the diff"; RED=1
+    fi
+  done
+else
+  echo "  (not a git checkout — skipped)"
+fi
+
+echo ""
 echo "── canaries: values a stale sync would silently revert ────────"
 canary() {  # name  file  pattern
   if grep -q "$3" "$2" 2>/dev/null; then echo "  ✓ $1"; else echo "  ✗ $1 — MISSING in $2"; RED=1; fi
@@ -75,10 +98,32 @@ canary "ON high/low exists"               analysis/liquidity.py   "def overnight
 canary "level tier is a VALUE not a flag" analysis/liquidity.py   "strongest_within"
 canary "orderflow declares approximation" analysis/orderflow.py   "approximated"
 canary "journal never raises"             analysis/signal_journal.py "return False        # deliberate"
+canary "Signal demands entry+stop+target"  strategy/base.py         "def validate"
+canary "R anchors to the INITIAL stop"     execution/exit_engine.py "initial_stop"
+canary "exits outrank adjustments"         execution/exit_engine.py "_exhaustion_exit"
+canary "scale-out at +1R exists"           execution/exit_engine.py "CLOSE_PARTIAL"
+canary "trail only ever tightens"          execution/exit_engine.py "def _tightens"
+canary "forced flatten crosses the spread" execution/exit_engine.py "session flatten"
+canary "hedge is never session-flattened"  execution/exit_engine.py "pos.profile != HEDGE"
+canary "anti-orphan: row stays OPEN"       execution/position_manager.py "ANTI-ORPHAN"
+canary "manager kwargs are optional"       execution/position_manager.py "structure=None, vol=None"
+canary "no booking on submission"          execution/order_confirm.py "def confirm_fill"
+canary "partial books only what filled"    execution/entry_engine.py "fill.filled_qty"
+canary "paper pays slippage"               execution/order_confirm.py "def paper_fill"
+canary "ORB opens-inside is definitional"  analysis/opening_range.py "inside_open"
+canary "ORB counts real bars"              analysis/opening_range.py "bars_since_break"
+canary "ORB timeout re-arms"               analysis/opening_range.py "TIMEOUT"
+canary "geometry gate bypasses the scorer" risk/setup_scorer.py     "_grade_geometry"
+canary "liquidity downgrades not vetoes"   risk/setup_scorer.py     "downgrade, not veto"
+canary "D1 refuses opposing flow"          strategy/day_mode.py     "a break on opposing flow"
+canary "D2 will not fade a trend"          strategy/day_mode.py     "do not fade a committed trend"
+canary "S1 refuses approximated flow"      strategy/scalp_mode.py   "approximated"
+canary "W2 abort condition exists"         strategy/swing_mode.py   "def value_fade_aborted"
+canary "hedge scored on variance"          strategy/hedge_mode.py   "def effectiveness"
 
 echo ""
 echo "── test suite ─────────────────────────────────────────────────"
-for suite in tests/test_foundation.py tests/test_analysis.py; do
+for suite in tests/test_foundation.py tests/test_analysis.py tests/test_execution.py; do
   "$PY" "$suite" >/tmp/ft_tests.txt 2>&1
   printf "  %-28s %s\n" "$(basename "$suite")" "$(tail -2 /tmp/ft_tests.txt | head -1 | xargs)"
   grep -q "0 failed" /tmp/ft_tests.txt || { echo "  ✗ $suite FAILING"; RED=1; }
