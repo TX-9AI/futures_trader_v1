@@ -1,5 +1,7 @@
 """
-futures_trader_v1/config.py — v0.4
+futures_trader_v1/config.py — v0.5
+v0.5 — 2026-07-25 — BP_GATE_ENABLED (follows trading mode: off in paper, on in
+        live) and BP_MIN_HEADROOM_PCT for the buying-power gate.
 v0.4 — 2026-07-25 — PAPER equity is a FIXED $25,000 constant, never resolved
         from the broker (operator directive: the futures account is not funded
         yet, and sizing that drifts with a live balance cannot be used to
@@ -205,6 +207,16 @@ MARGIN_BUFFER_MULT = _f("FT_MARGIN_BUFFER_MULT", 1.25)    # cushion over require
 OVERNIGHT_MARGIN_CHECK_ET = (16, 30)                      # pre-emptive de-risk check
 MARGIN_CALL_ALERT_ONLY = _b("FT_MARGIN_CALL_ALERT_ONLY", True)
 USE_BROKER_MARGIN = _b("FT_USE_BROKER_MARGIN", True)      # seeds -> broker truth
+# ── BUYING-POWER GATE (the fleet-exposure check) ─────────────────────────────
+# One shared account means the broker's buying power already nets off every
+# other box's margin, so a single read at order time IS the fleet check.
+# FOLLOWS TRADING MODE by default: off in paper (no real balance to gate
+# against), on in live. Nothing to remember on go-live — the same pattern that
+# made broker reconciliation reliable in the options engine.
+BP_GATE_ENABLED = _b("FT_BP_GATE", not PAPER_TRADING)
+# Never spend the last dollar: an adverse move before the stop needs somewhere
+# to go, or a normal loser becomes a margin call.
+BP_MIN_HEADROOM_PCT = _f("FT_BP_HEADROOM", 0.20)
 
 # ─── ROLL ─────────────────────────────────────────────────────────────────────
 ROLL_CONFIRM_SESSIONS = _i("FT_ROLL_CONFIRM_SESSIONS", 2)

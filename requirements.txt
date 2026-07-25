@@ -4,3 +4,4 @@ anyio
 pandas
 numpy
 tzdata
+boto3

@@ -1,5 +1,20 @@
 """
-futures_trader_v1/execution/margin_manager.py — v0.1
+futures_trader_v1/execution/margin_manager.py — v0.2
+v0.2 — 2026-07-25 — FLEET GATE. `fleet_gate()` answers "is there room in the
+        ACCOUNT for this trade" as one more entry gate, and it prefers the
+        broker's BUYING POWER over any local estimate.
+
+        The key realisation: every box draws on ONE account, so the broker's
+        reported buying power ALREADY has every other box's margin subtracted
+        from it. Asking the broker is inherently fleet-aware, needs no control
+        plane, cannot go stale, and works even if control is down — which
+        preserves the standalone-box property the whole design rests on.
+
+        What the broker CANNOT see is concentration: it does not know that long
+        MNQ + MES + MYM is one bet. That stays with the control plane and is
+        consumed here as an OPTIONAL constraint file — present and fresh, it is
+        honoured; absent or stale, it is skipped and SAID SO rather than
+        silently assumed clear.
 v0.1 — 2026-07-25 — Initial build. Margin truth, the day/overnight rate split,
         the pre-emptive overnight gate, and settlement/variation tracking.
 
@@ -64,6 +79,34 @@ class MarginRates:
         return {DAY_RATE: self.day,
                 INITIAL_RATE: self.initial,
                 MAINTENANCE_RATE: self.maintenance}[kind]
+
+
+@dataclass
+class FleetGate:
+    """The answer to 'is there room in the account for this?'"""
+    allowed: bool
+    reason: str
+    source: str = "unknown"        # broker | local estimate | control file
+    buying_power: float = 0.0
+    required: float = 0.0
+    group: str = ""
+    stale_constraint: bool = False
+
+    def __str__(self) -> str:
+        return f"[{self.source}] {self.reason}"
+
+
+@dataclass
+class BuyingPowerDecision:
+    """The last gate before an order. Distinct from MarginDecision because it
+    answers a different question: not 'does this fit our policy' but 'does the
+    ACCOUNT actually have the money right now'."""
+    allowed: bool
+    checked: bool                  # False = deliberately skipped (paper)
+    required: float = 0.0
+    available: float = 0.0
+    headroom_after: float = 0.0
+    reason: str = ""
 
 
 @dataclass
@@ -201,6 +244,123 @@ class MarginManager:
                               "clears overnight initial margin" if ok else
                               f"overnight initial needs ${req:,.0f} vs ${allowance:,.0f} "
                               f"— reduce to {keep} contract(s)")
+
+    # ── the fleet gate ───────────────────────────────────────────────────────
+    def fleet_gate(self, contracts: int, root: str = "", box: str = "",
+                   constraint: Optional[dict] = None,
+                   constraint_age_min: Optional[float] = None,
+                   max_age_min: float = 30.0) -> FleetGate:
+        """One more gate in the entry path. Refuses, and says why.
+
+        Order of authority:
+          1. BROKER BUYING POWER — already net of every other box on the shared
+             account. This is the real answer and it needs nothing else.
+          2. LOCAL ESTIMATE — used only when no broker snapshot exists (paper,
+             or a broker read that failed). Flagged as an estimate so nobody
+             mistakes it for account truth.
+          3. CONTROL CONSTRAINT — concentration limits the broker cannot see.
+             Optional. Stale or missing means SKIPPED AND REPORTED, never
+             assumed clear: a gate that fails open silently is not a gate.
+        """
+        need = self.per_contract() * contracts * self.buffer_mult
+        acct = self.account
+
+        if acct.buying_power and acct.buying_power > 0 and not acct.stale:
+            bp = acct.buying_power
+            if need > bp:
+                return FleetGate(False,
+                                 f"MARGIN EXHAUSTED — this trade needs "
+                                 f"${need:,.0f} and the account has "
+                                 f"${bp:,.0f} of buying power left "
+                                 f"(shared across the fleet)",
+                                 "broker", bp, need)
+            gate = FleetGate(True, f"${bp - need:,.0f} buying power remains "
+                                   f"after this trade", "broker", bp, need)
+        else:
+            cap = self.capacity()
+            if not cap.allowed or contracts > cap.max_contracts:
+                return FleetGate(False,
+                                 f"no broker buying power available; local "
+                                 f"estimate allows {cap.max_contracts} "
+                                 f"contract(s), asked for {contracts}",
+                                 "local estimate", cap.available, need)
+            gate = FleetGate(True, "within the local margin estimate "
+                                   "(no broker buying power to check against)",
+                             "local estimate", cap.available, need)
+
+        # concentration — the part the broker is blind to
+        if constraint:
+            if constraint_age_min is not None and constraint_age_min > max_age_min:
+                gate.stale_constraint = True
+                gate.reason += (f" | fleet concentration NOT checked "
+                                f"(control view is {constraint_age_min:.0f}m old)")
+            else:
+                stand_down = constraint.get("stand_down") or []
+                if box and box in stand_down:
+                    return FleetGate(False,
+                                     f"FLEET STAND-DOWN — control reports "
+                                     f"{constraint.get('status', 'BREACH')}: "
+                                     + "; ".join(constraint.get("findings", [])[:2]),
+                                     "control file", gate.buying_power, need,
+                                     stale_constraint=False)
+                gate.reason += " | fleet concentration clear"
+        else:
+            gate.reason += " | fleet concentration NOT checked (no control view)"
+        return gate
+
+    def buying_power_gate(self, contracts: int,
+                          account: Optional[Dict] = None,
+                          paper: bool = True,
+                          min_headroom_pct: float = 0.20,
+                          buffer_mult: Optional[float] = None) -> BuyingPowerDecision:
+        """THE FLEET-EXPOSURE GATE, and it needs no fleet plumbing.
+
+        Every box draws on ONE account, so the broker's reported buying power
+        ALREADY has every other box's margin subtracted from it. Asking the
+        broker at the moment of the order is therefore both simpler and more
+        accurate than aggregating twelve boxes' self-reports on a timer: there
+        is no push, no cadence, and nothing that can go stale between the
+        reading and the order.
+
+        DELIBERATELY INERT IN PAPER. Paper equity is a fixed constant and the
+        broker is never consulted for it, so there is no real buying power to
+        gate against — a paper gate would either check a made-up number or
+        block everything. It returns allowed=True with checked=False, which is
+        an honest 'not evaluated' rather than a silent pass.
+
+        HEADROOM, not the full balance. Consuming the last dollar of buying
+        power leaves nothing for an adverse move before the stop, which is how
+        a normal losing trade becomes a margin call.
+        """
+        if paper:
+            return BuyingPowerDecision(True, False,
+                                       reason="paper — buying power not checked")
+        if contracts < 1:
+            return BuyingPowerDecision(True, False, reason="no contracts requested")
+
+        acct = account or {}
+        bp = float(acct.get("buying_power", 0.0) or 0.0)
+        if bp <= 0:
+            # Fail CLOSED. An unknown balance is not permission.
+            return BuyingPowerDecision(
+                False, True, 0.0, 0.0, 0.0,
+                "broker reported no buying power — refusing to trade blind")
+
+        per = self.per_contract() * (buffer_mult if buffer_mult is not None
+                                     else self.buffer_mult)
+        required = per * contracts
+        usable = bp * (1.0 - max(0.0, min(0.9, min_headroom_pct)))
+        after = bp - required
+        if required > usable:
+            return BuyingPowerDecision(
+                False, True, required, bp, after,
+                f"needs ${required:,.0f} at the {self.rate_kind()} rate but only "
+                f"${usable:,.0f} of ${bp:,.0f} buying power is usable "
+                f"({min_headroom_pct*100:.0f}% headroom reserved) — the account "
+                f"is committed elsewhere")
+        return BuyingPowerDecision(
+            True, True, required, bp, after,
+            f"${required:,.0f} of ${bp:,.0f} buying power; ${after:,.0f} left")
 
     def usage_report(self, contracts: int) -> Dict[str, object]:
         """What this box publishes to the control layer for fleet aggregation."""

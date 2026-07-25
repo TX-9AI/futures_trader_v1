@@ -1,6 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# futures_trader_v1/check_versions.sh — v0.5
+# futures_trader_v1/check_versions.sh — v0.7
+# v0.7 — 2026-07-25 — buying-power gate canaries.
+# v0.6 — 2026-07-25 — Phase-5 canaries (11 new) + the control suite in the gate.
 # v0.5 — 2026-07-25 — Phase-4 canaries (13 new) + the runtime suite in the gate.
 # v0.4 — 2026-07-25 — GIT-AWARE BUMP CHECK. Header/changelog PARITY cannot catch
 #         a version bump that silently no-opped: if an edit misses the title
@@ -124,7 +126,7 @@ canary "hedge scored on variance"          strategy/hedge_mode.py   "def effecti
 
 echo ""
 echo "── test suite ─────────────────────────────────────────────────"
-for suite in tests/test_foundation.py tests/test_analysis.py tests/test_execution.py tests/test_runtime.py; do
+for suite in tests/test_foundation.py tests/test_analysis.py tests/test_execution.py tests/test_runtime.py tests/test_control.py; do
   "$PY" "$suite" >/tmp/ft_tests.txt 2>&1
   printf "  %-28s %s\n" "$(basename "$suite")" "$(tail -2 /tmp/ft_tests.txt | head -1 | xargs)"
   grep -q "0 failed" /tmp/ft_tests.txt || { echo "  ✗ $suite FAILING"; RED=1; }

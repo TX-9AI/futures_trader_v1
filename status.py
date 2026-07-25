@@ -1,5 +1,7 @@
 """
-futures_trader_v1/status.py — v0.1
+futures_trader_v1/status.py — v0.2
+v0.2 — 2026-07-25 — shows the buying-power gate state, and says plainly that it
+        is INERT rather than passing in paper.
 v0.1 — 2026-07-25 — Live snapshot for one box. Read-only, no orders, no writes.
 
 EVERY NUMBER STATES ITS SOURCE. The options status tool spent weeks printing a
@@ -61,6 +63,13 @@ def main() -> int:
     print(f" day P&L   ${pnl:,.2f}   limit ${-abs(limit):,.2f}"
           f"   {'HALTED' if pnl <= -abs(limit) else 'ok'}")
     print(f"           (limit source: config/env chain, not a display fallback)")
+    if C.PAPER_TRADING:
+        print(f" buy power INERT in paper — the gate is skipped, not passed")
+    else:
+        print(f" buy power gate {'ON' if C.BP_GATE_ENABLED else 'OFF'} · "
+              f"{C.BP_MIN_HEADROOM_PCT*100:.0f}% headroom reserved")
+        print(f"           (read from the broker at ORDER time; one shared "
+              f"account,\n            so it already nets every other box)")
     print("")
     if openrows:
         for r in openrows:

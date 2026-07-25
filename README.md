@@ -25,7 +25,7 @@ This repo is at **Phase 1**. What exists is the *futures-native foundation*: the
 | `main.py` loop, `status.py` | ✅ built, end-to-end tested |
 | Unattended install (`install`/`setup_ec2`/`bootstrap`/`configure`) | ✅ built |
 | Broker + DXLink adapters | ⚠️ **skeletons that refuse** — verify in Epoch 0 |
-| Control plane (`control/` fleet, orchestrator, EOD chain) | ⬜ Phase 5 |
+| Control plane (`control/` fleet, orchestrator, EOD chain) | ✅ built, 45/45 tests |
 | Capacity calculator / tick chart + eligibility policy | ✅ built |
 | `devtools.sh` (capacity, config, tests) · `check_versions.sh` | ✅ built |
 | Installer / configure.sh / fleet control | ⬜ Phase 4 |
@@ -44,6 +44,22 @@ installs `futures-feed.service` and `futuresbot.service` (feed first), hardens
 the host against mid-session restarts, then **shreds `bootstrap.sh`** and
 removes the deploy checkout. **Installs are always paper** — going live is a
 separate, deliberate act in `configure.sh` that requires typing `LIVE`.
+
+## Fleet exposure
+
+All boxes share **one account**, so the broker's reported buying power already
+has every other box's margin netted out of it. The gate is therefore a single
+read at order time in `margin_manager.buying_power_gate()` — no pushed state
+file, no polling cadence, nothing that can go stale between the reading and the
+order. It reserves `FT_BP_HEADROOM` (default 20%) so a normal loser cannot
+become a margin call, and it **fails closed**: an unreadable account is not
+permission to trade.
+
+It is **inert in paper** and reports itself as *not checked* rather than
+*passed* — paper equity is a fixed constant with no real buying power behind it.
+`control/margin_governor.py` remains the offline analytical view (correlated
+groups, one-way exposure), which is a different question from "can this order
+be funded right now".
 
 ## What is NOT verified
 
@@ -131,13 +147,13 @@ changing every table a dial was calibrated against.
 
 | File | v | Purpose |
 |---|---|---|
-| `config.py` | 0.4 | every tunable, `FT_*`; risk = 1% of equity |
+| `config.py` | 0.5 | every tunable, `FT_*`; risk = 1% of equity |
 | `data/contract_registry.py` | 0.1 | 37 roots, front month, roll state machine |
 | `utils/sessions.py` | 0.1 | Globex clock, killzones, flatten authority |
 | `risk/risk_manager.py` | 0.1 | contract sizing, R:R gate, net daily halt |
 | `risk/eligibility.py` | 0.1 | X vs 0 — mode policy per root |
 | `risk/capacity.py` | 0.3 | tick chart, universe matrix |
-| `execution/margin_manager.py` | 0.1 | day vs overnight rates, overnight gate |
+| `execution/margin_manager.py` | 0.2 | day vs overnight rates, overnight gate, **buying-power gate** |
 | `execution/roll_manager.py` | 0.1 | calendar-spread roll, granularity |
 | `database/trade_logger.py` | 0.1 | R-native schema, mode-scoped |
 | `data/series.py` | 0.1 | stdlib tape container — no pandas in the analysis layer |
@@ -161,17 +177,26 @@ changing every table a dial was calibrated against.
 | `execution/entry_engine.py` | 0.1 | mark-limit entries, sized to actual fills |
 | `execution/exit_engine.py` | 0.2 | the R ladder — scale, ratchet, trail, exhaustion |
 | `execution/position_manager.py` | 0.1 | anti-orphan, optional-kwarg tolerant |
-| `main.py` | 0.2 | the loop — manage, roll, then enter |
+| `main.py` | 0.3 | the loop — manage, roll, then enter |
 | `data/feed_store.py` | 0.1 | one writer, many readers, heartbeat |
 | `data/market_data.py` | 0.2 | pure reader, fails loud on staleness |
 | `data/futures_feed.py` | 0.1 | the single producer (+ `--sim`) |
 | `execution/broker.py` | 0.1 | PaperBroker works; TastyTrade refuses |
 | `notifications/alerts.py` | 0.1 | few events, never fatal |
-| `status.py` | 0.1 | snapshot; every number states its source |
+| `status.py` | 0.2 | snapshot; every number states its source |
 | `install.sh` · `setup_ec2.sh` · `bootstrap.example.sh` | 0.1 | unattended install |
 | `configure.sh` | 0.1 | runtime settings; go-live is loud |
-| `devtools.sh` | 0.4 | operator menu |
-| `check_versions.sh` | 0.5 | the push gate |
+| `control/fleet_config.py` | 0.1 | fleet universe, caps, correlation groups |
+| `control/ec2ops.py` | 0.1 | EC2 calls + mock; stopped, never terminated |
+| `control/fleet.py` | 0.2 | SSH fan-out: list, ping, run, collect |
+| `control/orchestrator.py` | 0.2 | session-aware wake · **overnight-protected stop** |
+| `control/margin_governor.py` | 0.1 | **one account, one bet** — fleet exposure |
+| `control/margin_report.py` | 0.1 | box-side read-only exposure line |
+| `control/harvest.py` | 0.1 | **order flow first** — the irreplaceable dataset |
+| `control/eod_conductor.py` | 0.1 | the chain, warn-never-stop |
+| `control/notify.py` | 0.1 | fleet-level Telegram |
+| `devtools.sh` | 0.5 | operator menu (30–41 = fleet) |
+| `check_versions.sh` | 0.7 | the push gate |
 
 ---
 

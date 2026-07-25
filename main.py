@@ -1,5 +1,11 @@
 """
-futures_trader_v1/main.py — v0.2
+futures_trader_v1/main.py — v0.3
+v0.3 — 2026-07-25 — BUYING-POWER GATE in the entry path, read fresh from the
+        broker at order time. Because all boxes share one account, the broker's
+        buying power is already fleet-aware, so this single check does the work
+        a pushed fleet-margin file would have done — with nothing to go stale.
+        Inert in paper; fails CLOSED if the account cannot be read; pages once
+        per exhaustion episode rather than on every rejected signal.
 v0.2 — 2026-07-25 — Journal payloads are NAMESPACED rather than **-merged. The
         signal dict and the score dict both carry "reason", so the merge raised
         TypeError in the entry path — on the first real signal, on a live box.
@@ -134,6 +140,7 @@ class Bot:
                                  place_single=None, alert=self.alerts.roll)
         self.l1 = ConfluenceScorer()
         self.l2 = ConvictionIntegrator()
+        self._bp_alerted = False
         self._integ_path = os.path.join("data", "integrator_state.json")
         self.l2.load(self._integ_path)
 
@@ -341,6 +348,20 @@ class Bot:
             log.info("sizing rejected: %s — %s", sized.reason, sized.detail)
             return
 
+        # THE FLEET-EXPOSURE GATE. Read the broker's buying power NOW, not from
+        # a cached snapshot: it already has every other box's margin netted out
+        # of it, so this one call is the whole fleet check. Skipped in paper.
+        bp = self._buying_power_gate(sized.contracts)
+        if not bp.allowed:
+            self.journal.disposition("buying_power_rejected", reason=bp.reason,
+                                     required=bp.required, available=bp.available)
+            log.warning("BUYING POWER: %s", bp.reason)
+            if not self._bp_alerted:
+                self._bp_alerted = True
+                self.alerts.attention(f"buying power exhausted — {bp.reason}")
+            return
+        self._bp_alerted = False
+
         if C.MODE in S.OVERNIGHT_MODES:
             gate = self.margin.overnight_gate(sized.contracts)
             if not gate.allowed:
@@ -391,6 +412,28 @@ class Bot:
         self.alerts.entry(sig, qty, sc.grade, fill_px)
         log.info("ENTERED %s %s x%d @ %.4f (%s)", sig.strategy, sig.direction,
                  qty, fill_px, sized.detail)
+
+    def _buying_power_gate(self, contracts: int):
+        """Fresh broker read at order time. One call per ENTRY ATTEMPT, not per
+        tick — the only moment the number actually has to be right."""
+        from execution.margin_manager import BuyingPowerDecision
+        if C.PAPER_TRADING or not C.BP_GATE_ENABLED:
+            return BuyingPowerDecision(True, False,
+                                       reason="paper — buying power not checked")
+        try:
+            acct = self.broker.account()
+        except Exception as e:                               # noqa: BLE001
+            # Fail CLOSED. Not knowing the balance is not permission to use it.
+            return BuyingPowerDecision(False, True, reason=
+                                       f"could not read the account: {e}")
+        self.margin.apply_account(AccountSnapshot(
+            net_liq=acct.get("net_liq", 0.0),
+            buying_power=acct.get("buying_power", 0.0),
+            maintenance_used=acct.get("maintenance_used", 0.0),
+            as_of=S.now_et(), source="broker"))
+        return self.margin.buying_power_gate(
+            contracts, acct, paper=False,
+            min_headroom_pct=C.BP_MIN_HEADROOM_PCT)
 
     # ── roll ─────────────────────────────────────────────────────────────────
     def _roll_check(self, sess) -> None:

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data import contract_registry as CR
 from utils import sessions as S
-from execution.margin_manager import MarginManager, AccountSnapshot
+from execution.margin_manager import MarginManager, AccountSnapshot, BuyingPowerDecision
 from execution.roll_manager import RollManager
 from risk.risk_manager import RiskManager
 from database.trade_logger import TradeLogger, TradeRecord
@@ -183,6 +183,37 @@ check("broker rates supersede seeds and the delta is reported",
 rep = mm_day.usage_report(2)
 check("box publishes fleet-aggregatable margin usage",
       rep["overnight_requirement"] == 3100 * 2, str(rep))
+
+print("\n=== 7b. BUYING-POWER GATE — the fleet-exposure check ===")
+mm_bp = MarginManager(mnq, "DAY", utilization_max=0.35, buffer_mult=1.25)
+d = mm_bp.buying_power_gate(2, {"buying_power": 50000}, paper=True)
+check("INERT IN PAPER — allowed, and honestly marked 'not checked'",
+      d.allowed and not d.checked, d.reason)
+d = mm_bp.buying_power_gate(2, {"buying_power": 50000}, paper=False)
+check("live: plenty of buying power passes", d.allowed and d.checked, d.reason)
+d = mm_bp.buying_power_gate(60, {"buying_power": 50000}, paper=False)
+check("live: an order beyond the account's buying power is REFUSED",
+      not d.allowed and d.checked, d.reason)
+check("the refusal says the account is committed elsewhere",
+      "committed elsewhere" in d.reason, d.reason)
+d = mm_bp.buying_power_gate(2, {"buying_power": 0}, paper=False)
+check("FAILS CLOSED — an unknown balance is not permission",
+      not d.allowed and "trade blind" in d.reason, d.reason)
+d = mm_bp.buying_power_gate(2, {}, paper=False)
+check("a missing account payload also fails closed", not d.allowed)
+per = mm_bp.per_contract() * 1.25
+edge = mm_bp.buying_power_gate(int((10000 * 0.8) // per),
+                               {"buying_power": 10000}, paper=False)
+check("headroom is reserved — the last dollar is never spent",
+      edge.allowed and edge.headroom_after > 0, edge.reason)
+over = mm_bp.buying_power_gate(int((10000 * 0.95) // per),
+                               {"buying_power": 10000}, paper=False)
+check("an order inside the balance but inside the HEADROOM is refused",
+      not over.allowed, over.reason)
+check("ONE SHARED ACCOUNT: the broker's BP already nets other boxes' margin, "
+      "so a lower BP at the same equity refuses what a higher BP allowed",
+      mm_bp.buying_power_gate(8, {"buying_power": 40000}, paper=False).allowed and
+      not mm_bp.buying_power_gate(8, {"buying_power": 4000}, paper=False).allowed)
 
 print("\n=== 8. ROLL MANAGER: SPREAD, GRANULARITY, HALF-COMPLETE ===")
 class _Fill:
