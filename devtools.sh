@@ -1,6 +1,7 @@
 #!/bin/bash
 # =============================================================================
-# futures_trader_v1/devtools.sh — v0.1
+# futures_trader_v1/devtools.sh — v0.2
+# v0.2 — 2026-07-25 — Phase-2: analysis suite + push gate menu items.
 # v0.1 — 2026-07-25 — Initial build. Only items that actually work are listed;
 #         fleet sections land in Phase 4 and are deliberately ABSENT rather than
 #         present-and-dead. A menu with dead options is worse than a small menu.
@@ -29,6 +30,8 @@ universe()     { "$PY" -m risk.capacity --matrix; }
 cfg_check()    { "$PY" -c "import config,sys;p=config.validate();print('\n'.join(p) if p else 'config OK — no problems');sys.exit(0)"; }
 roll_status()  { "$PY" -m execution.roll_status 2>/dev/null || echo "  (Phase 2)"; }
 run_tests()    { "$PY" tests/test_foundation.py; }
+run_analysis() { "$PY" tests/test_analysis.py; }
+run_gate()     { bash check_versions.sh; }
 
 while true; do
   banner
@@ -43,13 +46,15 @@ while true; do
    11) roll status (front month, window, crossover)
   ── tests ─────────────────────────────────────────────────────
    20) foundation test suite
+   21) analysis test suite
+   22) full push gate (check_versions.sh)
     0) quit
 MENU
   read -rp "  > " c
   case "$c" in
     1) tick_chart ;;  2) tick_other ;; 3) tick_equity ;; 4) universe ;;
     10) cfg_check ;; 11) roll_status ;;
-    20) run_tests ;;
+    20) run_tests ;; 21) run_analysis ;; 22) run_gate ;;
     0) exit 0 ;;
     *) echo "  ?" ;;
   esac

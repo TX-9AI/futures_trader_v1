@@ -1,6 +1,7 @@
 #!/bin/bash
 # =============================================================================
-# futures_trader_v1/check_versions.sh — v0.1
+# futures_trader_v1/check_versions.sh — v0.2
+# v0.2 — 2026-07-25 — Phase-2 canaries (17 new) + both test suites in the gate.
 # v0.1 — 2026-07-25 — Initial build. Header/changelog parity + canaries.
 #
 # WHY THIS EXISTS ON DAY ONE
@@ -58,12 +59,30 @@ canary "reads are mode-scoped"            database/trade_logger.py    "COALESCE(
 canary "expectancy reports avg win/loss R" database/trade_logger.py   "avg_loss_r"
 canary "flatten authority is single-source" utils/sessions.py    "def must_be_flat"
 canary "roll ignores out-of-window volume" data/contract_registry.py "roll_window_open"
+canary "BB width is a PERCENTILE not a ratio" analysis/volatility.py "def width_percentile"
+canary "VWAP guards zero volume"          analysis/volatility.py "if cum_v <= 0:"
+canary "trend weights RENORMALIZE"        analysis/trend.py       "def _renormalize"
+canary "missing frames are reported"      analysis/trend.py       "missing_frames"
+canary "L1 de-saturated RANGE_ROOM"       analysis/regime_confluence.py "RANGE_ROOM_LO\", 0.17"
+canary "L1 de-saturated OSC_CROSS"        analysis/regime_confluence.py "OSC_CROSS_HI\", 10.0"
+canary "futures corroborators at weight 0" analysis/regime_confluence.py "W_TREND_CVD\", 0.0"
+canary "L1 veto/necessary/corroborator grammar" analysis/regime_confluence.py "def _combine"
+canary "L2 has no UNKNOWN label"          analysis/conviction_integrator.py "always argmax"
+canary "L2 decay resists with conviction" analysis/conviction_integrator.py "exp(prm.lam \* c)"
+canary "L2 stale reason survives emission" analysis/conviction_integrator.py "stale_prefix"
+canary "BALANCED commits slowly (780s)"   analysis/conviction_integrator.py "tau_up=780.0"
+canary "ON high/low exists"               analysis/liquidity.py   "def overnight_extremes"
+canary "level tier is a VALUE not a flag" analysis/liquidity.py   "strongest_within"
+canary "orderflow declares approximation" analysis/orderflow.py   "approximated"
+canary "journal never raises"             analysis/signal_journal.py "return False        # deliberate"
 
 echo ""
 echo "── test suite ─────────────────────────────────────────────────"
-"$PY" tests/test_foundation.py >/tmp/ft_tests.txt 2>&1
-tail -2 /tmp/ft_tests.txt | head -1
-grep -q "0 failed" /tmp/ft_tests.txt || { echo "  ✗ tests failing — see /tmp/ft_tests.txt"; RED=1; }
+for suite in tests/test_foundation.py tests/test_analysis.py; do
+  "$PY" "$suite" >/tmp/ft_tests.txt 2>&1
+  printf "  %-28s %s\n" "$(basename "$suite")" "$(tail -2 /tmp/ft_tests.txt | head -1 | xargs)"
+  grep -q "0 failed" /tmp/ft_tests.txt || { echo "  ✗ $suite FAILING"; RED=1; }
+done
 
 echo ""
 if [ "$RED" -eq 0 ]; then echo "  ALL GREEN — safe to push"; else echo "  ✗ REDS PRESENT — do not push"; fi

@@ -18,7 +18,7 @@ This repo is at **Phase 1**. What exists is the *futures-native foundation*: the
 | Roll manager (calendar spread, granularity, half-complete paging) | ✅ built |
 | Trade log (futures schema, R-native, mode-scoped) | ✅ built |
 | Strategy design + epoch ladder | ✅ documented (`docs/`) |
-| Analysis stack (structure, liquidity, profile, order flow, L1/L2) | ⬜ Phase 2 |
+| Analysis stack (structure, liquidity, profile, order flow, L1/L2) | ✅ built, 76/76 tests |
 | Strategies (the roster in `docs/STRATEGIES.md`) | ⬜ Phase 3 |
 | Execution engines + broker adapter | ⬜ Phase 3 |
 | Capacity calculator / tick chart + eligibility policy | ✅ built |
@@ -112,8 +112,18 @@ changing every table a dial was calibrated against.
 | `execution/margin_manager.py` | 0.1 | day vs overnight rates, overnight gate |
 | `execution/roll_manager.py` | 0.1 | calendar-spread roll, granularity |
 | `database/trade_logger.py` | 0.1 | R-native schema, mode-scoped |
-| `devtools.sh` | 0.1 | operator menu |
-| `check_versions.sh` | 0.1 | the push gate |
+| `data/series.py` | 0.1 | stdlib tape container — no pandas in the analysis layer |
+| `analysis/volatility.py` | 0.1 | ATR, Bollinger (width as **percentile**), guarded VWAP |
+| `analysis/trend.py` | 0.1 | EMA stacks, ADX from 5m, **renormalized** TF vote |
+| `analysis/market_structure.py` | 0.1 | swings, BOS/CHoCH, FVG, order blocks, PD position |
+| `analysis/liquidity.py` | 0.1 | tiered level map incl. **overnight H/L** |
+| `analysis/profile.py` | 0.1 | POC, value area, migration, naked POCs |
+| `analysis/orderflow.py` | 0.1 | CVD, divergence, absorption (declares approximation) |
+| `analysis/regime_confluence.py` | 0.1 | **L1** — ported grammar + calibrated dials |
+| `analysis/conviction_integrator.py` | 0.1 | **L2** — persistence, hysteresis, staleness |
+| `analysis/signal_journal.py` | 0.1 | log-only capture, never fatal |
+| `devtools.sh` | 0.2 | operator menu |
+| `check_versions.sh` | 0.2 | the push gate |
 
 ---
 
