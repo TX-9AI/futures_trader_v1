@@ -21,12 +21,39 @@ This repo is at **Phase 1**. What exists is the *futures-native foundation*: the
 | Analysis stack (structure, liquidity, profile, order flow, L1/L2) | ✅ built, 76/76 tests |
 | Strategies (the roster in `docs/STRATEGIES.md`) | ✅ built, 75/75 tests |
 | Execution engines (entry, exit, position manager) | ✅ built |
-| Broker adapter (TastyTrade futures) | ⬜ Phase 4 |
+| Feed producer + store + reader | ✅ built |
+| `main.py` loop, `status.py` | ✅ built, end-to-end tested |
+| Unattended install (`install`/`setup_ec2`/`bootstrap`/`configure`) | ✅ built |
+| Broker + DXLink adapters | ⚠️ **skeletons that refuse** — verify in Epoch 0 |
+| Control plane (`control/` fleet, orchestrator, EOD chain) | ⬜ Phase 5 |
 | Capacity calculator / tick chart + eligibility policy | ✅ built |
 | `devtools.sh` (capacity, config, tests) · `check_versions.sh` | ✅ built |
 | Installer / configure.sh / fleet control | ⬜ Phase 4 |
 
 **`FT_PAPER_TRADING` defaults to `True` and must never default otherwise in this file.**
+
+## Unattended install
+
+```bash
+source bootstrap.sh && curl -fsSL https://raw.githubusercontent.com/TX-9AI/futures_trader_v1/main/install.sh -o install.sh && bash install.sh
+```
+
+`bootstrap.sh` (gitignored, copied from `bootstrap.example.sh`) exports the
+credentials; `setup_ec2.sh` sees them, skips every prompt, builds the venv,
+installs `futures-feed.service` and `futuresbot.service` (feed first), hardens
+the host against mid-session restarts, then **shreds `bootstrap.sh`** and
+removes the deploy checkout. **Installs are always paper** — going live is a
+separate, deliberate act in `configure.sh` that requires typing `LIVE`.
+
+## What is NOT verified
+
+`TastyTradeBroker` and `DXLinkTransport` are **skeletons that raise rather than
+guess**. Futures symbology, the aggressor-side field, signed vs sided order
+prices, and which buying-power number to size against all need confirming
+against the live SDK on the tiny account. A skeleton that returns a plausible
+fill is more dangerous than one that refuses — that is the
+submission-vs-fill defect family wearing a different hat. Use `devtools` item 25
+(`--sim`) to exercise the full pipeline without a market.
 
 ---
 
@@ -134,8 +161,17 @@ changing every table a dial was calibrated against.
 | `execution/entry_engine.py` | 0.1 | mark-limit entries, sized to actual fills |
 | `execution/exit_engine.py` | 0.2 | the R ladder — scale, ratchet, trail, exhaustion |
 | `execution/position_manager.py` | 0.1 | anti-orphan, optional-kwarg tolerant |
-| `devtools.sh` | 0.3 | operator menu |
-| `check_versions.sh` | 0.3 | the push gate |
+| `main.py` | 0.2 | the loop — manage, roll, then enter |
+| `data/feed_store.py` | 0.1 | one writer, many readers, heartbeat |
+| `data/market_data.py` | 0.2 | pure reader, fails loud on staleness |
+| `data/futures_feed.py` | 0.1 | the single producer (+ `--sim`) |
+| `execution/broker.py` | 0.1 | PaperBroker works; TastyTrade refuses |
+| `notifications/alerts.py` | 0.1 | few events, never fatal |
+| `status.py` | 0.1 | snapshot; every number states its source |
+| `install.sh` · `setup_ec2.sh` · `bootstrap.example.sh` | 0.1 | unattended install |
+| `configure.sh` | 0.1 | runtime settings; go-live is loud |
+| `devtools.sh` | 0.4 | operator menu |
+| `check_versions.sh` | 0.5 | the push gate |
 
 ---
 

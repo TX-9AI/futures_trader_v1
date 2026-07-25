@@ -1,5 +1,9 @@
 """
-futures_trader_v1/strategy/base.py — v0.1
+futures_trader_v1/strategy/base.py — v0.2
+v0.2 — 2026-07-25 — net_target(): fallback targets are solved for the NET R:R
+        after commission, not the geometric one. On a micro a round turn is a
+        material fraction of a small stop, so every geometric fallback was
+        landing below the fee-aware floor the risk manager applies.
 v0.1 — 2026-07-25 — Initial build. The Signal contract every strategy emits and
         the R math every strategy shares.
 
@@ -130,8 +134,32 @@ class Strategy:
 
     # shared helpers -------------------------------------------------------
     @staticmethod
+    def net_target(entry: float, direction: str, risk: float, want_rr: float,
+                   spec=None, commission: float = 0.0) -> float:
+        """The price achieving `want_rr` AFTER fees.
+
+        Geometry is not the same as net. A round turn on MNQ is 5 ticks against
+        a 36-tick stop, so a geometric 2.0R target settles at about 1.63 net and
+        the risk manager — which is fee-aware — correctly refuses it. Every
+        strategy that could not name a structural target was producing exactly
+        that trade. Solving for the net multiple puts the fee arithmetic in ONE
+        place instead of leaving each strategy to under-aim by a different
+        amount.
+
+            reward_ticks = (rr * (stop_ticks * tv + fee) + fee) / tv
+        """
+        sign = 1 if direction == LONG else -1
+        if spec is None or spec.tick_value <= 0 or commission <= 0:
+            return entry + sign * risk * want_rr
+        stop_ticks = risk / spec.tick_size
+        risk_usd = stop_ticks * spec.tick_value + commission
+        reward_ticks = (want_rr * risk_usd + commission) / spec.tick_value
+        return entry + sign * reward_ticks * spec.tick_size
+
+    @staticmethod
     def _target_from_levels(entry: float, direction: str, liquidity,
-                            fallback_r: float, risk: float) -> (float, str):
+                            fallback_r: float, risk: float,
+                            spec=None, commission: float = 0.0) -> (float, str):
         """Prefer a NAMED level as the target — the opposing pool is where the
         move is actually going. Fall back to an R multiple only when the map has
         nothing in the path, and say which was used."""
@@ -141,5 +169,5 @@ class Strategy:
             for lv in pool:
                 if abs(lv.price - entry) >= risk * 1.2:
                     return lv.price, f"target = {lv.name}"
-        sign = 1 if direction == LONG else -1
-        return entry + sign * risk * fallback_r, f"target = {fallback_r:g}R (no level in path)"
+        px = Strategy.net_target(entry, direction, risk, fallback_r, spec, commission)
+        return px, f"target = {fallback_r:g}R net of fees (no level in path)"

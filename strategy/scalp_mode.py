@@ -1,5 +1,6 @@
 """
-futures_trader_v1/strategy/scalp_mode.py — v0.1
+futures_trader_v1/strategy/scalp_mode.py — v0.2
+v0.2 — 2026-07-25 — fallback targets solved NET of fees (base.net_target).
 v0.1 — 2026-07-25 — Initial build. S1 Absorption Reversal, S2 Killzone Micro-
         Continuation. Flat by the cash close, time-stopped, killzone-gated.
 
@@ -62,7 +63,7 @@ class AbsorptionReversal(Strategy):
         risk = abs(price - stop)
         if risk <= 0:
             return None
-        target, tnote = self._target_from_levels(price, direction, liq, 2.0, risk)
+        target, tnote = self._target_from_levels(price, direction, liq, 2.0, risk, spec, C.COMMISSION_PER_CONTRACT_RT)
 
         return Signal(
             self.name, direction, price, stop, target,

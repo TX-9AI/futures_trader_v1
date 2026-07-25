@@ -1,5 +1,6 @@
 """
-futures_trader_v1/strategy/swing_mode.py — v0.1
+futures_trader_v1/strategy/swing_mode.py — v0.2
+v0.2 — 2026-07-25 — fallback targets solved NET of fees (base.net_target).
 v0.1 — 2026-07-25 — Initial build. W1 HTF PD-Array Swing, W2 Value Migration
         Fade. Held overnight; sized on the OVERNIGHT INITIAL margin rate.
 

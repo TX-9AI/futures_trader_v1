@@ -1,5 +1,11 @@
 """
-futures_trader_v1/strategy/day_mode.py — v0.1
+futures_trader_v1/strategy/day_mode.py — v0.2
+v0.2 — 2026-07-25 — D1 TARGET FIX. The range projection is measured from the
+        break level while the entry sits at the retest, so a late retest left a
+        tiny reward against a full-width stop and the R:R gate refused every
+        such setup. The target is now the FURTHER of the projection and the next
+        opposing pool. Found by the end-to-end loop test, which produced a real
+        signal at 0.39 R:R.
 v0.1 — 2026-07-25 — Initial build. D1 Opening Drive Break+Retest, D2 Liquidity
         Sweep Reversal, D3 Trend Continuation. Flat by the cash close.
 
@@ -44,8 +50,19 @@ class OpeningDriveBreakRetest(Strategy):
         if stop is None:
             return None
 
+        # TARGET: the range projection is measured from the BREAK LEVEL, but the
+        # entry is wherever the retest confirmed — so a late retest can leave
+        # almost no reward against a full-width stop, and the R:R gate correctly
+        # refuses it. Take the FURTHER of the range projection and the next
+        # opposing pool: the projection is geometry, the pool is where the move
+        # is actually going. Whichever is further is the honest objective.
         width = orb.width or 0.0
-        target = (orb.high + width) if direction == LONG else (orb.low - width)
+        projection = (orb.high + width) if direction == LONG else (orb.low - width)
+        risk_guess = abs(price - stop)
+        pooled, tnote = self._target_from_levels(
+            price, direction, ctx.get("liquidity"), 2.0, risk_guess,
+            spec, C.COMMISSION_PER_CONTRACT_RT)
+        target = max(projection, pooled) if direction == LONG else min(projection, pooled)
 
         flow = ctx.get("flow")
         if flow is not None and getattr(flow, "warm", False) and \
@@ -65,13 +82,14 @@ class OpeningDriveBreakRetest(Strategy):
         return Signal(
             self.name, direction, price, stop, target,
             reason=f"opening-range {direction.lower()} break + retest "
-                   f"(depth {orb.retest_depth_ticks:.0f} ticks)",
+                   f"(depth {orb.retest_depth_ticks:.0f} ticks); {tnote}",
             regime=ctx.get("regime", ""), regime_conviction=ctx.get("conviction", 0.0),
             session_phase=ctx.get("session_phase", ""), killzone=ctx.get("killzone", ""),
             cvd=getattr(flow, "cvd", 0.0) if flow else 0.0,
             pd_position=getattr(ctx.get("structure"), "pd_position", None),
             confluence={"orb_width": width, "attempts": orb.attempts,
-                        "retest_depth_ticks": orb.retest_depth_ticks},
+                        "retest_depth_ticks": orb.retest_depth_ticks,
+                        "projection": projection, "pooled_target": pooled},
             at=ctx.get("now"))
 
 
@@ -110,7 +128,8 @@ class LiquiditySweepReversal(Strategy):
                     continue
                 stop = recent_high + spec.tick_size * 2
                 target, tnote = self._target_from_levels(
-                    price, SHORT, liq, 3.0, abs(stop - price))
+                    price, SHORT, liq, 3.0, abs(stop - price),
+                    spec, C.COMMISSION_PER_CONTRACT_RT)
                 return self._mk(SHORT, price, stop, target, lv, pen_ticks, tnote, ctx)
             # sweep LOW -> long
             if recent_low < lv.price and close > lv.price:
@@ -119,7 +138,8 @@ class LiquiditySweepReversal(Strategy):
                     continue
                 stop = recent_low - spec.tick_size * 2
                 target, tnote = self._target_from_levels(
-                    price, LONG, liq, 3.0, abs(price - stop))
+                    price, LONG, liq, 3.0, abs(price - stop),
+                    spec, C.COMMISSION_PER_CONTRACT_RT)
                 return self._mk(LONG, price, stop, target, lv, pen_ticks, tnote, ctx)
         return None
 
@@ -181,8 +201,9 @@ class TrendContinuation(Strategy):
         if (direction == LONG and stop >= price) or (direction == SHORT and stop <= price):
             return None
         risk = abs(price - stop)
-        target, tnote = self._target_from_levels(price, direction,
-                                                 ctx.get("liquidity"), 3.0, risk)
+        target, tnote = self._target_from_levels(
+            price, direction, ctx.get("liquidity"), 3.0, risk,
+            spec, C.COMMISSION_PER_CONTRACT_RT)
         flow = ctx.get("flow")
         return Signal(
             self.name, direction, price, stop, target,
