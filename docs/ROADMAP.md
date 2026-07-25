@@ -1,5 +1,29 @@
 # ROADMAP.md — futures_trader_v1
+**v0.2 — 2026-07-25 — build state added; P1 closed; the replay harness named as
+the calibration vehicle; Epoch 0's blocking prerequisite made explicit.**
 **v0.1 — 2026-07-25 — the epoch ladder: priors → measurements → frozen dials → live size.**
+
+---
+
+## BUILD STATE (2026-07-25)
+
+Every layer is written and tested: foundation, analysis (L1/L2), the strategy
+roster, execution, the runtime loop, the unattended install and the control
+plane. **361 assertions across five suites**, verified from a clean clone.
+
+**Nothing has traded.** The ladder below has not started.
+
+**The one blocking prerequisite is the funded LLC account.** Two adapters remain
+unwritten and refuse rather than guess:
+
+| | needs confirming on the tiny account |
+|---|---|
+| `execution/broker.TastyTradeBroker` | futures symbology; signed vs sided order price; whether MARKET is accepted on an outright and on a calendar spread; the field carrying the per-leg net FILL price; how a partial is reported; which buying-power number to size against |
+| `data/futures_feed.DXLinkTransport` | the streamer symbol for a front month and whether it matches the order endpoint; which event carries the aggressor side and how it is encoded; snapshot vs increment on reconnect; backfill behaviour after a session break |
+
+Until then the entire pipeline runs against `PaperBroker` and
+`SimulatedTransport` — `devtools` item 25 exercises it end to end with no market
+open, which is how Epoch 0's non-broker criteria get met in advance.
 
 The options project reached L2 in four months and is still short of L3. This one should be faster, and you named the reason: no Greeks, no chain, no premium-relative exit surface. A futures position's risk is a price distance. That collapses most of the complexity that made the options calibration slow.
 
@@ -12,6 +36,7 @@ The options project reached L2 in four months and is still short of L3. This one
 **Purpose:** prove the plumbing before any decision depends on it.
 
 **Exit criteria — all must be green:**
+- **Adapters written and confirmed** (see BUILD STATE) — this gates everything else in this epoch.
 - Feed integrity: one DXFeed subscription per box, store heartbeat healthy, zero-volume and NaN guards proven on a real ETH session (the SPX VWAP-on-zero-volume bug pinned a false signal for a whole session and raised nothing).
 - Contract registry cross-check: every deployed root's front month, tick value and margin reconciled against the broker's own numbers. **Any seed off by >10% is corrected in the registry, not tolerated.**
 - Roll dry-run: `assess_roll` executed against real daily volume for every root; the window and crossover dates printed and eyeballed.
@@ -40,6 +65,13 @@ The options project reached L2 in four months and is still short of L3. This one
 ## Epoch 2 — L1 calibration and freeze (2 weeks)
 
 **Purpose:** make the evidence layer honest, then stop touching it.
+
+**Vehicle:** `tests/replay.py` — it imports the LIVE engines, so a calibration can
+never quietly measure a bot that no longer exists. It carries a rolling
+warm-bar window (`--bookmark`, default 15 sessions) and REPORTS the starved
+fraction, because the options replay fed one day at a time and silently
+produced no ranging evidence on 21.9% of ticks — the first ~75 minutes of every
+session, the most active part of the day.
 
 **Work:** re-fit every ramp bound from the accumulated tick pool (the options analogue: RANGING was saturating at p90=1.0 and colliding with TRENDING on 14–25% of ticks; re-fitting from 60k ticks cut it to 4.3%). Run the co-occurrence check — two regimes scoring high on the same tick is either genuine cross-horizon overlap or a saturated ramp, and the difference matters. Validate labels against **independently derived** session labels from raw price action only — labels that import nothing from the regime stack, so they remain ground truth rather than a restatement of the thing being tested.
 
@@ -89,7 +121,7 @@ Order of scaling: contracts before symbols, symbols before modes. Add one thing 
 
 ## Parallel tracks (ungated, may run any time)
 
-- **P1 — Order-flow archive.** Tick trade data with aggressor side cannot be reconstructed after the session, exactly as option chains could not. Archive from day one on every box and harvest nightly. The options project discovered this exposure late and had ~29 boxes accumulating an irreplaceable dataset with no copy on control. Do not repeat it.
+- **P1 — Order-flow archive. ✅ DONE, built in from day one.** `feed_store` records every tick print with its aggressor side, and `control/harvest.py` pulls it FIRST — ahead of trades and journals — because it is the one dataset that cannot be reconstructed after the close. A failed order-flow pull is escalated as unrecoverable rather than counted as a warning. This is the exposure the options project found late, with ~29 boxes accumulating an irreplaceable archive that had no copy on control.
 - **P2 — SMT peer broadcast.** Control publishes per-symbol state so correlated boxes can see each other. Log-only first.
 - **P3 — Level-hierarchy validation.** Does the tier ranking actually predict? Offline, no bot code.
 - **P4 — Conditional probability tables.** Fold into the EOD chain from the start, never as a manual job. Your standing directive: anything that needs running daily is an EOD phase, not something to remember.

@@ -6,26 +6,39 @@
 
 ## ⚠️ STATE OF THE BUILD — read this first
 
-This repo is at **Phase 1**. What exists is the *futures-native foundation*: the layer that has no analogue in `options_trader_v3` and that every later module is generated against. It is tested and proven; it does not yet trade.
+**The build is complete end to end** — foundation, analysis, strategies, execution,
+runtime, unattended install and control plane, at **361 assertions across five
+suites**. It has never traded.
+
+**The only unwritten code is the two broker adapters**, and they are unwritten on
+purpose: `TastyTradeBroker` and `DXLinkTransport` raise `NotImplementedError`
+with the specific things to confirm, rather than returning plausible fakes. They
+need a funded account, which is the sole remaining prerequisite. Everything
+above them is exercised against `PaperBroker` and `SimulatedTransport`, so the
+whole pipeline runs today with no market open (`devtools` item 25).
 
 | Layer | State |
 |---|---|
-| Contract registry (specs, front month, expiry rules) | ✅ built, 62/62 tests |
+| Contract registry (specs, front month, expiry rules) | ✅ built |
 | Roll state machine (volume crossover, deadlines) | ✅ built |
 | Session clock (Globex, break, holidays, killzones, mode flatten) | ✅ built |
 | Contract sizing + R:R gate + net daily halt | ✅ built |
 | Margin manager (day vs overnight rates, fleet publication) | ✅ built |
-| Roll manager (calendar spread, granularity, half-complete paging) | ✅ built |
+| Roll manager + operator roll (one / subset / all) | ✅ built |
 | Trade log (futures schema, R-native, mode-scoped) | ✅ built |
 | Strategy design + epoch ladder | ✅ documented (`docs/`) |
-| Analysis stack (structure, liquidity, profile, order flow, L1/L2) | ✅ built, 76/76 tests |
-| Strategies (the roster in `docs/STRATEGIES.md`) | ✅ built, 75/75 tests |
+| Analysis stack (structure, liquidity, profile, order flow, L1/L2) | ✅ built |
+| Strategies (the roster in `docs/STRATEGIES.md`) | ✅ built |
 | Execution engines (entry, exit, position manager) | ✅ built |
 | Feed producer + store + reader | ✅ built |
 | `main.py` loop, `status.py` | ✅ built, end-to-end tested |
 | Unattended install (`install`/`setup_ec2`/`bootstrap`/`configure`) | ✅ built |
 | Broker + DXLink adapters | ⚠️ **skeletons that refuse** — verify in Epoch 0 |
-| Control plane (`control/` fleet, orchestrator, EOD chain) | ✅ built, 45/45 tests |
+| Control plane (`control/` fleet, orchestrator, EOD chain) | ✅ built |
+| Buying-power gate (fleet exposure via the shared account) | ✅ built |
+| Roll volume trigger (back month subscribed in-window) | ✅ built |
+| Offline replay harness (bookmark-warmed) | ✅ built |
+| Control timers (session-aware wake, EOD) | ✅ built |
 | Capacity calculator / tick chart + eligibility policy | ✅ built |
 | `devtools.sh` (capacity, config, tests) · `check_versions.sh` | ✅ built |
 | Installer / configure.sh / fleet control | ⬜ Phase 4 |
@@ -124,7 +137,10 @@ python3 tests/test_foundation.py
 ./devtools.sh               # menu — item 1 is the tick chart
 ```
 
-**83 assertions** over real dates and real contract specs. No broker, no network, no environment.
+**361 assertions across five suites**, all stdlib — no broker, no network, no
+market open. `check_versions.sh` is the push gate: header/changelog parity, a
+git-aware version-bump check, 51 canaries, and every suite. It withholds
+`ALL GREEN` on a version-discipline failure even when all 361 tests pass.
 
 ## Sizing at a glance
 
@@ -199,6 +215,7 @@ changing every table a dial was calibrated against.
 | `control/roll_control.py` | 0.1 | operator roll: one / subset / all |
 | `control/roll_now.py` | 0.1 | box-side roll executor |
 | `tests/replay.py` | 0.1 | **offline replay, bookmark-warmed** |
+| `tests/test_{foundation,analysis,execution,runtime,control}.py` | — | the five suites (361 assertions) |
 | `install_control_timers.sh` | 0.1 | wake + EOD systemd timers |
 | `devtools.sh` | 0.6 | operator menu |
 | `check_versions.sh` | 0.8 | the push gate |
