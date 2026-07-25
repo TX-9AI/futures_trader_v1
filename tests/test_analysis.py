@@ -1,5 +1,8 @@
 """
-futures_trader_v1/tests/test_analysis.py — v0.1
+futures_trader_v1/tests/test_analysis.py — v0.2
+v0.2 — 2026-07-25 — L2 cold-start section: theta_floor emits NO label over an
+        all-zeros conviction book, and BALANCED's deliberate slowness
+        (tau_up 780s) is locked in so nobody "fixes" it later.
 v0.1 — 2026-07-25 — Behavioural proof for the Phase-2 analysis stack.
 
 Synthetic tape with KNOWN geometry, so every assertion has a right answer that
@@ -298,6 +301,28 @@ ig4 = ConvictionIntegrator(); ig4.load(snap)
 check("state survives a restart (warm load, no cold-start blind spot)",
       ig4.incumbent == ig.incumbent and
       abs(ig4.C[RC.EXPANSION] - ig.C[RC.EXPANSION]) < 1e-9)
+
+ig5 = ConvictionIntegrator()
+s5 = ig5.update(15.0, ev())          # all evidence zero
+check("a COLD integrator emits NO regime, not an arbitrary argmax over zeros",
+      s5.regime is None, f"{s5.regime} c={s5.conviction:.3f}")
+check("and it says why", "no conviction yet" in s5.trigger, s5.trigger)
+for t5 in range(2, 40):
+    s5 = ig5.update(t5 * 15.0, ev(BALANCED=0.9))
+check("once evidence accumulates it emits normally",
+      s5.regime == RC.BALANCED and s5.conviction > 0.4, f"{s5.regime} {s5.conviction}")
+# ~10 minutes of unbroken flat evidence and BALANCED is still under 0.5. That is
+# tau_up=780s working exactly as intended: on real tape trends hold a false-flat
+# angle for 12-15 bars while genuine ranges hold 24-29, so commitment is placed
+# past the impostor window. Locked in so nobody "fixes" the slowness later.
+check("BALANCED is DELIBERATELY SLOW to commit (tau_up 780s)",
+      s5.conviction < 0.6, f"{s5.conviction:.3f} after ~10 minutes")
+for t5 in range(40, 200):
+    s5 = ig5.update(t5 * 15.0, ev(BALANCED=0.9))
+check("...but it does get there on sustained evidence",
+      s5.conviction > 0.85, f"{s5.conviction:.3f}")
+check("the floor is well below theta_hold so it only catches the cold case",
+      IntegratorParams().theta_floor < IntegratorParams().theta_hold / 10)
 
 print("\n=== 9. SIGNAL JOURNAL — never fatal ===")
 jd = tempfile.mkdtemp()

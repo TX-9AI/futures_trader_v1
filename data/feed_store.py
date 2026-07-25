@@ -1,5 +1,9 @@
 """
-futures_trader_v1/data/feed_store.py — v0.1
+futures_trader_v1/data/feed_store.py — v0.2
+v0.2 — 2026-07-25 — session_volume table + volume_history(): the front-vs-back
+        daily volume the roll crossover needs. Without it the roll could only
+        ever fire on its hard deadline, which is safe but late — by then
+        liquidity has already moved to the back month and fills are worse.
 v0.1 — 2026-07-25 — Initial build. The box's single SQLite (WAL) tape store:
         one writer, many readers, with a heartbeat.
 
@@ -42,6 +46,12 @@ CREATE INDEX IF NOT EXISTS ix_tape ON trades_tape(symbol, ts);
 
 CREATE TABLE IF NOT EXISTS quotes (
     symbol TEXT PRIMARY KEY, ts INTEGER, bid REAL, ask REAL, last REAL
+);
+
+CREATE TABLE IF NOT EXISTS session_volume (
+    contract_code TEXT NOT NULL, session_date TEXT NOT NULL,
+    volume REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (contract_code, session_date)
 );
 
 CREATE TABLE IF NOT EXISTS heartbeat (
@@ -121,6 +131,44 @@ class FeedStore:
             c.execute("INSERT OR REPLACE INTO quotes (symbol,ts,bid,ask,last) "
                       "VALUES (?,?,?,?,?)", (symbol, _now(), bid, ask, last))
             c.commit()
+
+    def add_session_volume(self, contract_code: str, session: str,
+                           volume: float) -> None:
+        """Accumulate a contract's volume for a session.
+
+        Exists because the ROLL TRIGGER is a volume crossover between the front
+        and back month, and a box that only ever subscribes to the front month
+        has nothing to compare. During the roll window the producer records both
+        here; outside it, only the front."""
+        if self.read_only or volume <= 0:
+            return
+        with closing(self._conn()) as c:
+            c.execute("INSERT INTO session_volume (contract_code,session_date,volume) "
+                      "VALUES (?,?,?) ON CONFLICT(contract_code,session_date) "
+                      "DO UPDATE SET volume = volume + excluded.volume",
+                      (contract_code, session, float(volume)))
+            c.commit()
+
+    def volume_history(self, front_code: str, back_code: str,
+                       limit: int = 20) -> List[Tuple[str, float, float]]:
+        """-> [(session_date, front_volume, back_volume)] oldest first.
+
+        Only sessions where BOTH contracts reported are returned: a crossover
+        needs two numbers, and treating a missing back-month figure as zero
+        would make the front look dominant forever and the roll would never
+        fire."""
+        try:
+            with closing(self._conn()) as c:
+                rows = c.execute(
+                    "SELECT f.session_date, f.volume AS fv, b.volume AS bv "
+                    "FROM session_volume f JOIN session_volume b "
+                    "ON f.session_date = b.session_date "
+                    "WHERE f.contract_code=? AND b.contract_code=? "
+                    "ORDER BY f.session_date DESC LIMIT ?",
+                    (front_code, back_code, limit)).fetchall()
+        except sqlite3.Error:
+            return []
+        return [(r["session_date"], r["fv"], r["bv"]) for r in reversed(rows)]
 
     def beat(self, producer: str = "feed", note: str = "") -> None:
         if self.read_only:

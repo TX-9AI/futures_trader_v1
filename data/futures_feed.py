@@ -1,5 +1,10 @@
 """
-futures_trader_v1/data/futures_feed.py — v0.1
+futures_trader_v1/data/futures_feed.py — v0.2
+v0.2 — 2026-07-25 — BACK-MONTH VOLUME during the roll window. The roll trigger
+        is a front-vs-back volume crossover and a one-contract subscription had
+        nothing to compare, so the roll could only ever fire on its hard
+        deadline. The back month is now subscribed for VOLUME ONLY, only inside
+        the window, and released when it closes.
 v0.1 — 2026-07-25 — Initial build. THE box's single market-data producer.
 
     python -m data.futures_feed          (runs as futures-feed.service)
@@ -38,7 +43,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import config as C
-from data.contract_registry import front_and_back, get_spec
+from data.contract_registry import (assess_roll, front_and_back, get_spec,
+                                    OFF_WINDOW)
 from data.feed_store import FeedStore
 from utils import sessions as S
 
@@ -149,24 +155,73 @@ class Aggregator:
 
 class FeedProducer:
     def __init__(self, transport: Optional[Transport] = None,
-                 store_path: Optional[str] = None):
+                 store_path: Optional[str] = None,
+                 back_transport: Optional[Transport] = None):
         self.spec = get_spec(C.SYMBOL)
         self.store = FeedStore(store_path or C.CANDLE_STORE)
         self.transport = transport or DXLinkTransport()
         self.agg = Aggregator(self.spec.tick_size)
         self.running = True
-        self.contract = front_and_back(C.SYMBOL, S.session_date())[0].code
+        front, back = front_and_back(C.SYMBOL, S.session_date())
+        self.contract = front.code
+        self.back_contract = back.code
+        # THE BACK MONTH IS SUBSCRIBED ONLY INSIDE THE ROLL WINDOW, and only for
+        # VOLUME. A crossover needs two numbers and a box that watches one
+        # contract has nothing to compare — but carrying a second subscription
+        # all year would double the feed cost for a signal that matters on about
+        # eight days of it. No back-month candles, no back-month quotes.
+        self._back_transport = back_transport
+        self._back_connected = False
+
+    def in_roll_window(self, on=None) -> bool:
+        try:
+            a = assess_roll(C.SYMBOL, on or S.session_date())
+        except Exception:                                    # noqa: BLE001
+            return False
+        return a.state != OFF_WINDOW
 
     def step(self) -> int:
+        sess = S.session_date().isoformat()
         prints, quote = self.transport.drain()
         n = 0
         if prints:
             self.store.append_trades(C.SYMBOL, prints)
             for tf, rows in self.agg.add(prints).items():
                 n += self.store.upsert_candles(C.SYMBOL, tf, rows)
+            self.store.add_session_volume(
+                self.contract, sess, sum(p[3] for p in prints))
         if quote:
             self.store.put_quote(C.SYMBOL, quote[0], quote[1], quote[2])
-        self.store.beat("feed", f"{self.contract} {len(prints)} prints")
+
+        # back month — volume only, and only inside the window
+        if self.in_roll_window():
+            if self._back_transport is not None and not self._back_connected:
+                try:
+                    self._back_transport.connect(self.back_contract)
+                    self._back_connected = True
+                    log.info("roll window open — subscribed %s for volume",
+                             self.back_contract)
+                except Exception as e:                       # noqa: BLE001
+                    log.warning("back-month subscribe failed: %s", e)
+            if self._back_connected:
+                try:
+                    bprints, _ = self._back_transport.drain()
+                    if bprints:
+                        self.store.add_session_volume(
+                            self.back_contract, sess,
+                            sum(p[3] for p in bprints))
+                except Exception as e:                       # noqa: BLE001
+                    log.warning("back-month drain failed: %s", e)
+        elif self._back_connected:
+            try:
+                self._back_transport.close()
+            except Exception:                                # noqa: BLE001
+                pass
+            self._back_connected = False
+            log.info("roll window closed — released %s", self.back_contract)
+
+        self.store.beat("feed", f"{self.contract} {len(prints)} prints"
+                                f"{' +back' if self._back_connected else ''}")
         return n
 
     def run(self, poll_s: float = 1.0) -> int:
@@ -191,8 +246,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                         format="%(asctime)s %(levelname)-7s feed: %(message)s")
     argv = argv if argv is not None else sys.argv[1:]
     sim = "--sim" in argv
-    t = SimulatedTransport(tick_size=get_spec(C.SYMBOL).tick_size) if sim else None
-    p = FeedProducer(t)
+    tick = get_spec(C.SYMBOL).tick_size
+    t = SimulatedTransport(tick_size=tick) if sim else None
+    b = SimulatedTransport(tick_size=tick, seed=29) if sim else DXLinkTransport()
+    p = FeedProducer(t, back_transport=b)
     signal.signal(signal.SIGTERM, p.stop)
     signal.signal(signal.SIGINT, p.stop)
     return p.run()

@@ -1,5 +1,10 @@
 """
-futures_trader_v1/analysis/conviction_integrator.py — v0.1
+futures_trader_v1/analysis/conviction_integrator.py — v0.2
+v0.2 — 2026-07-25 — theta_floor: emit NO regime while every conviction is still
+        at zero. argmax over zeros returned whichever label sorted first, so a
+        COLD integrator reported TRENDING_UP at conviction 0.00 — opening the
+        trending gate that the design treats as a high bar. Found by the first
+        real run of the replay harness.
 v0.1 — 2026-07-25 — Initial build. LAYER 2: persistence.
 
 THIS IS THE "PERSISTENCE AND PRESCIENCE" REQUIREMENT, MADE MECHANICAL.
@@ -64,6 +69,8 @@ class IntegratorParams:
     delta_displace: float = 0.12   # margin a challenger needs over the incumbent
     dt_max: float = 90.0           # gap beyond this => do not integrate, mark stale
     tau_stale: float = 600.0       # decay constant while evidence is unobservable
+    theta_floor: float = 0.02      # below this, emit NO label rather than an
+                                   # arbitrary argmax over zeros
 
     per_regime: Dict[str, RegimeParams] = field(default_factory=lambda: {
         # Directional regimes commit in roughly one confirmed candle of
@@ -145,6 +152,21 @@ class ConvictionIntegrator:
         top = max(self.C, key=lambda r: self.C[r])
         top_c = self.C[top]
         trigger = why
+
+        # NOTHING LEARNED YET IS NOT A LABEL. With every conviction still at
+        # zero, argmax returns whichever regime happens to sort first — and
+        # downstream that is indistinguishable from a real read. A cold
+        # integrator would have reported TRENDING_UP with conviction 0.00 and
+        # opened the trending gate that the whole design treats as a HIGH BAR.
+        # This is NOT reintroducing an UNKNOWN label: an emitted regime still
+        # always carries a conviction number. It is refusing to emit before any
+        # evidence has accumulated at all.
+        if top_c <= self.p.theta_floor:
+            self.incumbent = None
+            return IntegratorState(regime=None, conviction=0.0,
+                                   convictions=dict(self.C), stale=self.stale,
+                                   trigger=(f"{why} | no conviction yet "
+                                            f"(top {top_c:.3f})"), dt=dt)
         # A STALE reason must survive the emission branches below. Losing it was
         # a real bug caught in test: the state carried stale=True while the
         # trigger string read "released TRENDING_UP", so the operator-facing

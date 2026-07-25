@@ -1,6 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# futures_trader_v1/check_versions.sh — v0.7
+# futures_trader_v1/check_versions.sh — v1.0
+# v1.0 — 2026-07-25 — the bump check now COMPARES THE HEADER VERSIONS directly
+#         (working tree vs HEAD:file) instead of grepping the diff text for a
+#         version line. The grep approach red-flagged data/futures_feed.py even
+#         though HEAD was v0.1 and the tree was v0.2 — the bump was genuinely
+#         there and the pattern missed it. Comparing the two headers answers the
+#         real question, cannot false-positive on diff formatting, and also
+#         catches a changed file that has no header at all.
+# v0.9 — 2026-07-25 — a RED now says WHICH failure it is: header never bumped,
+#         versus header bumped in an earlier commit so the bump is absent from
+#         this diff. Those need opposite responses and the old message could not
+#         tell them apart.
+# v0.8 — 2026-07-25 — Phase-6 canaries: roll volume, replay harness, timers.
 # v0.7 — 2026-07-25 — buying-power gate canaries.
 # v0.6 — 2026-07-25 — Phase-5 canaries (11 new) + the control suite in the gate.
 # v0.5 — 2026-07-25 — Phase-4 canaries (13 new) + the runtime suite in the gate.
@@ -56,12 +68,22 @@ PYEOF
 echo ""
 echo "── version bumped where content changed (git-aware) ───────────"
 if git rev-parse --git-dir >/dev/null 2>&1; then
-  for f in $(git diff --name-only HEAD 2>/dev/null | grep -E '\.(py|sh)$'); do
+  changed=$(git diff --name-only HEAD 2>/dev/null | grep -E '\.(py|sh)$' || true)
+  if [ -z "$changed" ]; then
+    echo "  (no tracked .py/.sh changes against HEAD)"
+  fi
+  for f in $changed; do
     [ -f "$f" ] || continue
-    if git diff -U0 HEAD -- "$f" | grep -qE '^\+.*— v[0-9]+\.[0-9]+'; then
-      echo "  ✓ $f  version line touched"
+    cur=$(grep -m1 -oE 'v[0-9]+\.[0-9]+' "$f" 2>/dev/null | head -1)
+    old=$(git show "HEAD:$f" 2>/dev/null | grep -m1 -oE 'v[0-9]+\.[0-9]+' | head -1)
+    if [ -z "$cur" ]; then
+      echo "  ✗ $f  CHANGED and has NO version header at all"; RED=1
+    elif [ -z "$old" ]; then
+      echo "  ✓ $f  new in this change ($cur)"
+    elif [ "$cur" = "$old" ]; then
+      echo "  ✗ $f  CHANGED but header still $cur — BUMP IT"; RED=1
     else
-      echo "  ✗ $f  CHANGED but no version line in the diff"; RED=1
+      echo "  ✓ $f  $old -> $cur"
     fi
   done
 else

@@ -1,6 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# futures_trader_v1/devtools.sh — v0.5
+# futures_trader_v1/devtools.sh — v0.6
+# v0.6 — 2026-07-25 — item 42 ROLL NOW (one/subset/all, guarded) and 43 offline
+#         replay.
 # v0.5 — 2026-07-25 — Phase-5 FLEET section (30-41): list/ping/run, fleet margin,
 #         mode-aware wake/stop, harvest, roll status, EOD chain.
 # v0.4 — 2026-07-25 — Phase-4: box/service items, feed health, simulation mode,
@@ -51,6 +53,16 @@ fleet_eod()    { "$PY" -m control.eod_conductor; }
 fleet_eod_dry(){ "$PY" -m control.eod_conductor --dry-run --no-stop; }
 fleet_harvest(){ "$PY" -c "from control.harvest import Harvester;r=Harvester().run();print(' ',r.headline());[print('  !',w) for w in r.warnings]"; }
 fleet_roll()   { "$PY" -c "from datetime import date;from control.eod_conductor import Conductor;p=Conductor()._roll(date.today());print(' ',p.headline)"; }
+fleet_roll_go(){ echo "  selection: 'all', a symbol (MNQ), or a subset (MNQ,MES)"; read -rp "  > " sel; "$PY" -c "
+import sys
+from control.roll_control import RollControl
+def confirm(msg):
+    print(msg); return input('  type ROLL to execute: ').strip()=='ROLL'
+r=RollControl(confirm=confirm).execute(sys.argv[1])
+print(' ',r.headline())
+[print('  !',w) for w in r.warnings]
+[print('  ',e) for e in r.executed]" "$sel"; }
+replay_run()   { read -rp "  store path (blank = this box's feed): " sp; read -rp "  step bars (1): " st; "$PY" tests/replay.py --store "${sp:-data/feed_store.db}" --step "${st:-1}" --out "reports/replay_$(date +%F).jsonl"; }
 bot_status()   { "$PY" status.py; }
 svc()          { systemctl is-active "$1" 2>/dev/null || echo "-"; }
 svc_status()   { echo "  futuresbot   : $(svc futuresbot)"; echo "  futures-feed : $(svc futures-feed)"; }
@@ -88,6 +100,8 @@ while true; do
    37) stop EVERYTHING incl. overnight (guarded)
    38) harvest now (order flow first)
    39) roll status across the fleet
+   42) ROLL NOW — one / subset / all (guarded)
+   43) offline replay (bookmark-warmed)
    40) EOD chain — dry run
    41) EOD chain — execute
   ── tests ─────────────────────────────────────────────────────
@@ -108,7 +122,7 @@ MENU
     20) run_tests ;; 21) run_analysis ;; 23) run_exec ;; 24) run_runtime ;; 25) feed_sim ;; 26) run_control ;;
     30) fleet_list ;; 31) fleet_ping ;; 32) fleet_run ;; 33) fleet_margin ;;
     34) fleet_wake_dry ;; 35) fleet_wake ;; 36) fleet_stop ;; 37) fleet_stop_all ;;
-    38) fleet_harvest ;; 39) fleet_roll ;; 40) fleet_eod_dry ;; 41) fleet_eod ;; 22) run_gate ;;
+    38) fleet_harvest ;; 39) fleet_roll ;; 42) fleet_roll_go ;; 43) replay_run ;; 40) fleet_eod_dry ;; 41) fleet_eod ;; 22) run_gate ;;
     0) exit 0 ;;
     *) echo "  ?" ;;
   esac

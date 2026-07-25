@@ -1,5 +1,8 @@
 """
-futures_trader_v1/tests/test_runtime.py — v0.1
+futures_trader_v1/tests/test_runtime.py — v0.2
+v0.2 — 2026-07-25 — roll-volume section (front/back session volume, unpaired
+        sessions excluded, back month only in-window), replay-harness section,
+        and control-timer assertions.
 v0.1 — 2026-07-25 — Behavioural proof for the Phase-4 runtime: store, reader,
         broker, feed producer, and the loop end to end.
     python3 tests/test_runtime.py
@@ -181,6 +184,62 @@ bot2 = M.Bot()
 bot2.boot()
 check("a restart ADOPTS nothing when the book is flat", bot2.positions.flat)
 
+print("\n=== 6b. ROLL VOLUME — the crossover can actually fire ===")
+vs = FeedStore(os.path.join(TMP, "vol.db"))
+vs.add_session_volume("MNQU6", "2026-09-08", 900000)
+vs.add_session_volume("MNQZ6", "2026-09-08", 400000)
+vs.add_session_volume("MNQU6", "2026-09-09", 700000)
+vs.add_session_volume("MNQZ6", "2026-09-09", 800000)
+vh = vs.volume_history("MNQU6", "MNQZ6")
+check("front and back volume recorded per session", len(vh) == 2, str(vh))
+check("history is oldest-first and paired", vh[0][0] == "2026-09-08" and vh[1][2] == 800000)
+vs.add_session_volume("MNQU6", "2026-09-10", 500000)
+check("a session with only the FRONT reporting is EXCLUDED (a crossover needs "
+      "two numbers; treating a missing back month as zero would freeze the roll)",
+      len(vs.volume_history("MNQU6", "MNQZ6")) == 2)
+vs.add_session_volume("MNQU6", "2026-09-08", 100000)
+check("volume accumulates within a session",
+      vs.volume_history("MNQU6", "MNQZ6")[0][1] == 1000000)
+from data.contract_registry import assess_roll, CROSSOVER
+from datetime import date as _date
+hist = [(_date.fromisoformat(d), f, b) for d, f, b in
+        [("2026-09-08", 900000, 400000), ("2026-09-09", 700000, 800000),
+         ("2026-09-10", 500000, 1100000)]]
+a = assess_roll("MNQ", _date(2026, 9, 10), hist, confirm_sessions=2)
+check("real volume history CONFIRMS the crossover (it could not before)",
+      a.state == CROSSOVER and a.should_roll, f"{a.state} {a.reason}")
+a2 = assess_roll("MNQ", _date(2026, 9, 10), None, confirm_sessions=2)
+check("with NO history it falls through to the deadline path only",
+      not a2.should_roll, a2.reason)
+fp2 = FeedProducer(SimulatedTransport(tick_size=0.25),
+                   os.path.join(TMP, "roll.db"),
+                   back_transport=SimulatedTransport(tick_size=0.25, seed=5))
+check("the back month is NOT subscribed outside the roll window",
+      not fp2.in_roll_window(_date(2026, 8, 1)))
+check("it IS subscribed inside the window",
+      fp2.in_roll_window(_date(2026, 9, 10)))
+
+print("\n=== 6c. REPLAY HARNESS ===")
+import subprocess
+fp3 = FeedProducer(SimulatedTransport(tick_size=0.25),
+                   os.path.join(TMP, "replay.db"),
+                   back_transport=SimulatedTransport(tick_size=0.25, seed=9))
+for _ in range(1200): fp3.step()
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
+from replay import Replayer
+rp = Replayer("MNQ", bookmark_sessions=15, step_bars=10)
+summ = rp.run(fp3.store.path)
+check("replay scores archived tape through the REAL engines", summ.ticks > 5,
+      str(summ.ticks))
+check("sampling is not mistaken for a feed gap (dt_max follows --step)",
+      summ.stale == 0, f"{summ.stale}/{summ.ticks} stale")
+check("the harness reports starvation separately from a legitimate veto",
+      hasattr(summ, "ranging_silent") and hasattr(summ, "ranging_vetoed"))
+check("a warm bookmark leaves no starved ticks", summ.starved == 0, str(summ.starved))
+rp2 = Replayer("MNQ", step_bars=1)
+check("dt_max is raised only as far as the step needs",
+      rp2.l2.p.dt_max == 90.0, str(rp2.l2.p.dt_max))
+
 print("\n=== 7. INSTALL SCHEMA — the unattended contract ===")
 setup = open("setup_ec2.sh").read()
 check("unattended detection present", "UNATTENDED=true" in setup)
@@ -196,6 +255,11 @@ check("needrestart is blocked so an upgrade cannot restart us mid-session",
 conf = open("configure.sh").read()
 check("go-live requires typing LIVE", 'type LIVE to confirm' in conf)
 check("go-live shows capacity at the live balance first", "risk.capacity" in conf)
+tm = open("install_control_timers.sh").read()
+check("control timers installed for wake and EOD",
+      "ft-wake.timer" in tm and "ft-eod.timer" in tm)
+check("timers are Persistent=false (a missed run must not fire into a session)",
+      tm.count("Persistent=false") >= 2)
 
 print(f"\n{'='*62}\n  {PASS} passed, {FAIL} failed\n{'='*62}")
 sys.exit(1 if FAIL else 0)

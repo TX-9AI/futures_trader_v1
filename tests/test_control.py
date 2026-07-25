@@ -1,5 +1,7 @@
 """
-futures_trader_v1/tests/test_control.py — v0.1
+futures_trader_v1/tests/test_control.py — v0.2
+v0.2 — 2026-07-25 — roll-control section: one/subset/all targeting, confirm
+        required, and a half-complete roll halting the batch.
 v0.1 — 2026-07-25 — Behavioural proof for the Phase-5 control plane.
     python3 tests/test_control.py
 """
@@ -228,6 +230,38 @@ check("D2 is a WINNING-RATE-POSITIVE, EXPECTANCY-NEGATIVE book — exactly the "
       str(rep["D2"]))
 check("the headline states expectancy, never win rate alone",
       "E=" in pe.headline, pe.headline)
+
+print("\n=== 8. ROLL CONTROL — one / subset / all ===")
+from control.roll_control import RollControl, root_of
+check("box names with a disambiguating digit resolve to the real root",
+      root_of("MES2") == "MES" and root_of("MNQ") == "MNQ")
+f6 = mk_fleet(runner=lambda i, c: RunResult(i.box, True, "COMPLETE"))
+f6.start(f6.instances())
+rc = RollControl(f6, confirm=lambda m: True)
+check("'all' targets every running box", len(rc.plan("all")) == 6)
+check("a single symbol targets one box", len(rc.plan("MNQ")) == 1)
+check("a comma-separated subset targets exactly those",
+      len(rc.plan("MNQ,MES,MGC")) == 3)
+check("an unknown selection targets nothing rather than everything",
+      rc.plan("NOPE") == [])
+declined = RollControl(f6, confirm=lambda m: False).execute("all")
+check("execute REQUIRES confirmation and cancels without it",
+      declined.executed == [] and "cancelled" in declined.warnings[0])
+halt_calls = []
+f7 = mk_fleet(runner=lambda i, c: RunResult(i.box, True, "HALF_COMPLETE front closed"))
+f7.start(f7.instances())
+rc2 = RollControl(f7, confirm=lambda m: True, alert=halt_calls.append)
+# 2026-09-17 is one business day before MNQU6's last trade, so the roll is
+# FORCED and a plan actually exists to execute. On 09-10 the window is merely
+# open and every plan is "no roll needed" — nothing to halt on.
+rep = rc2.execute("MNQ", on=date(2026, 9, 17))
+check("a HALF-COMPLETE roll HALTS the batch instead of rolling on",
+      rep.halted_on != "" and len(rep.executed) == 1, rep.headline())
+ok_run = mk_fleet(runner=lambda i, c: RunResult(i.box, True, "COMPLETE"))
+ok_run.start(ok_run.instances())
+clean = RollControl(ok_run, confirm=lambda m: True).execute("MNQ", on=date(2026, 9, 17))
+check("a clean roll does not halt anything", clean.halted_on == "", clean.headline())
+check("and it pages", any("HALF-COMPLETE" in a for a in halt_calls))
 
 print(f"\n{'='*62}\n  {PASS} passed, {FAIL} failed\n{'='*62}")
 sys.exit(1 if FAIL else 0)

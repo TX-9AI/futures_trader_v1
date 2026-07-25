@@ -1,5 +1,8 @@
 """
-futures_trader_v1/main.py — v0.3
+futures_trader_v1/main.py — v0.4
+v0.4 — 2026-07-25 — the roll now receives REAL front-vs-back session volume, so
+        the crossover trigger actually fires. Previously volume_history=None
+        made it unconfirmable and every roll fell through to its hard deadline.
 v0.3 — 2026-07-25 — BUYING-POWER GATE in the entry path, read fresh from the
         broker at order time. Because all boxes share one account, the broker's
         buying power is already fleet-aware, so this single check does the work
@@ -413,6 +416,16 @@ class Bot:
         log.info("ENTERED %s %s x%d @ %.4f (%s)", sig.strategy, sig.direction,
                  qty, fill_px, sized.detail)
 
+    def _volume_history(self, sess):
+        """[(session_date, front_vol, back_vol)] from the shared store."""
+        try:
+            front, back = front_and_back(C.SYMBOL, sess)
+            rows = self.md.store.volume_history(front.code, back.code)
+            return [(date.fromisoformat(d), fv, bv) for d, fv, bv in rows]
+        except Exception as e:                               # noqa: BLE001
+            log.warning("volume history unavailable: %s", e)
+            return None
+
     def _buying_power_gate(self, contracts: int):
         """Fresh broker read at order time. One call per ENTRY ATTEMPT, not per
         tick — the only moment the number actually has to be right."""
@@ -441,7 +454,12 @@ class Bot:
                 if self.positions.position else 0)
         direction = (self.positions.position.direction
                      if self.positions.position else "FLAT")
-        plan = self.rolls.plan(C.SYMBOL, sess, volume_history=None,
+        # Real front-vs-back session volume, recorded by the producer while the
+        # roll window is open. Passing None here (as v0.2 did) left the
+        # crossover permanently unconfirmable, so every roll fell through to the
+        # hard deadline — safe, but late and at worse fills.
+        vh = self._volume_history(sess)
+        plan = self.rolls.plan(C.SYMBOL, sess, volume_history=vh,
                                open_contracts=held, direction=direction)
         if plan.kind == "no_roll_needed":
             return

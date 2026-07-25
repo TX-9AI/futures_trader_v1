@@ -164,7 +164,7 @@ changing every table a dial was calibrated against.
 | `analysis/profile.py` | 0.1 | POC, value area, migration, naked POCs |
 | `analysis/orderflow.py` | 0.1 | CVD, divergence, absorption (declares approximation) |
 | `analysis/regime_confluence.py` | 0.1 | **L1** — ported grammar + calibrated dials |
-| `analysis/conviction_integrator.py` | 0.1 | **L2** — persistence, hysteresis, staleness |
+| `analysis/conviction_integrator.py` | 0.2 | **L2** — persistence, hysteresis, staleness |
 | `analysis/signal_journal.py` | 0.1 | log-only capture, never fatal |
 | `analysis/opening_range.py` | 0.1 | the ORB state machine, definitions intact |
 | `strategy/base.py` | 0.1 | Signal contract — entry + stop + target or no trade |
@@ -177,10 +177,10 @@ changing every table a dial was calibrated against.
 | `execution/entry_engine.py` | 0.1 | mark-limit entries, sized to actual fills |
 | `execution/exit_engine.py` | 0.2 | the R ladder — scale, ratchet, trail, exhaustion |
 | `execution/position_manager.py` | 0.1 | anti-orphan, optional-kwarg tolerant |
-| `main.py` | 0.3 | the loop — manage, roll, then enter |
-| `data/feed_store.py` | 0.1 | one writer, many readers, heartbeat |
+| `main.py` | 0.4 | the loop — manage, roll, then enter |
+| `data/feed_store.py` | 0.2 | one writer, many readers, heartbeat, roll volume |
 | `data/market_data.py` | 0.2 | pure reader, fails loud on staleness |
-| `data/futures_feed.py` | 0.1 | the single producer (+ `--sim`) |
+| `data/futures_feed.py` | 0.2 | the single producer (+ `--sim`), back month in-window |
 | `execution/broker.py` | 0.1 | PaperBroker works; TastyTrade refuses |
 | `notifications/alerts.py` | 0.1 | few events, never fatal |
 | `status.py` | 0.2 | snapshot; every number states its source |
@@ -195,8 +195,13 @@ changing every table a dial was calibrated against.
 | `control/harvest.py` | 0.1 | **order flow first** — the irreplaceable dataset |
 | `control/eod_conductor.py` | 0.1 | the chain, warn-never-stop |
 | `control/notify.py` | 0.1 | fleet-level Telegram |
-| `devtools.sh` | 0.5 | operator menu (30–41 = fleet) |
-| `check_versions.sh` | 0.7 | the push gate |
+
+| `control/roll_control.py` | 0.1 | operator roll: one / subset / all |
+| `control/roll_now.py` | 0.1 | box-side roll executor |
+| `tests/replay.py` | 0.1 | **offline replay, bookmark-warmed** |
+| `install_control_timers.sh` | 0.1 | wake + EOD systemd timers |
+| `devtools.sh` | 0.6 | operator menu |
+| `check_versions.sh` | 0.8 | the push gate |
 
 ---
 
