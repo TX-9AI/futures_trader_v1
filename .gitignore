@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+trades.db
+trades.db-wal
+trades.db-shm
+bot.log
+credentials.py
+bootstrap.sh
+*.pem
+.env
+data/feed_store.db*
+data/signal_journal/
+data/orderflow/
+data/OHLC/

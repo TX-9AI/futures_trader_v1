@@ -1,0 +1,6 @@
+tastytrade
+httpx
+anyio
+pandas
+numpy
+tzdata
