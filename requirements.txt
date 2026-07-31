@@ -5,3 +5,8 @@ pandas
 numpy
 tzdata
 boto3
+pyflakes  # tests/test_no_undefined_names.py — ported from options_trader_v3
+          # 2026-07-31. That repo lost a full ORB window (continuation `mid`)
+          # and an hour of one box (butterfly `_mult`) to undefined names in two
+          # days; both were findable by static analysis in under a second.
+          # This repo has NO push.sh, so the suite is the only chokepoint.
